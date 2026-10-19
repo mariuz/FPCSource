@@ -684,6 +684,48 @@ implementation
             nested:=true;
             done:=true;
           end;
+        la_catchswitch:
+          begin
+            owner.writer.AsmWrite(getopstr(taillvm(hp).oper[0]^,false)+' = catchswitch within ');
+            if taillvm(hp).oper[1]^.reg=NR_NO then
+              owner.writer.AsmWrite('none')
+            else
+              owner.writer.AsmWrite(getopstr(taillvm(hp).oper[1]^,false));
+            owner.writer.AsmWrite(' ['+getopstr(taillvm(hp).oper[2]^,false)+'] unwind ');
+            if taillvm(hp).ops=4 then
+              owner.writer.AsmWrite(getopstr(taillvm(hp).oper[3]^,false))
+            else
+              owner.writer.AsmWrite('to caller');
+            done:=true;
+          end;
+        la_catchpad,
+        la_cleanuppad:
+          begin
+            owner.writer.AsmWrite(getopstr(taillvm(hp).oper[0]^,false)+' = '+getopcodestr(taillvm(hp))+' within ');
+            if taillvm(hp).oper[1]^.reg=NR_NO then
+              owner.writer.AsmWrite('none')
+            else
+              owner.writer.AsmWrite(getopstr(taillvm(hp).oper[1]^,false));
+            owner.writer.AsmWrite(' [');
+            if op=la_catchpad then
+              owner.writer.AsmWrite(getopstr(taillvm(hp).oper[2]^,false)+' '+getopstr(taillvm(hp).oper[3]^,false));
+            owner.writer.AsmWrite(']');
+            done:=true;
+          end;
+        la_catchret:
+          begin
+            owner.writer.AsmWrite('catchret from '+getopstr(taillvm(hp).oper[0]^,false)+' to '+getopstr(taillvm(hp).oper[1]^,false));
+            done:=true;
+          end;
+        la_cleanupret:
+          begin
+            owner.writer.AsmWrite('cleanupret from '+getopstr(taillvm(hp).oper[0]^,false)+' unwind ');
+            if taillvm(hp).ops=2 then
+              owner.writer.AsmWrite(getopstr(taillvm(hp).oper[1]^,false))
+            else
+              owner.writer.AsmWrite('to caller');
+            done:=true;
+          end;
         la_alloca:
           begin
             owner.writer.AsmWrite(getreferencestring(taillvm(hp).oper[0]^.ref^,false)+' = ');
@@ -1595,7 +1637,9 @@ implementation
 
           ait_seh_directive :
             begin
-              internalerror(2013010713);
+              { SEH directives are handled by LLVM based on landingpad/catchpad/cleanuppad }
+              writer.AsmWrite(asminfo^.comment);
+              writer.AsmWriteLn(sehdirectivestr[tai_seh_directive(hp).kind]);
             end;
           ait_typedconst:
             begin
@@ -1790,7 +1834,9 @@ implementation
           idtxt  : 'CLANG-LLVM';
           asmbin : 'clang';
           asmcmd: '-x ir $OPT -target $TRIPLET -c -o $OBJ $ASM $EXTRAOPT';
-          supported_targets : [system_x86_64_linux,system_aarch64_linux,system_arm_linux,system_x86_64_openbsd,system_x86_64_freebsd];
+          supported_targets : [system_x86_64_linux,system_aarch64_linux,system_arm_linux,system_x86_64_openbsd,system_x86_64_freebsd,
+                               system_x86_64_win64,system_i386_win32,system_aarch64_win64,system_i386_linux,
+                               system_wasm32_embedded,system_wasm32_wasip1,system_wasm32_wasip1threads,system_wasm32_wasip2];
           flags : [af_smartlink_sections,af_llvm];
           labelprefix : '.L';
           labelmaxlen : -1;

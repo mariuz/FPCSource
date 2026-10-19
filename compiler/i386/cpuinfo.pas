@@ -170,6 +170,21 @@ const
      'AVX512F'
    );
 
+   fputypestrllvm : array[tfputype] of string[7] = ('',
+//     'SOFT',
+     'x87',
+     'sse',
+     'sse2',
+     'sse3',
+     'ssse3',
+     'sse4.1',
+     'sse4.2',
+     'avx',
+     'fma',
+     'avx2',
+     'avx512f'
+   );
+
    sse_singlescalar = [fpu_sse..fpu_avx512f];
    sse_doublescalar = [fpu_sse2..fpu_avx512f];
 

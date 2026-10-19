@@ -48,6 +48,7 @@ interface
         procedure poppad;
         function currlandingpad: taillvm;
         procedure setup_eh; override;
+        procedure set_eh_info; override;
         procedure finish_eh; override;
         procedure start_eh(list: TAsmList); override;
         procedure end_eh(list: TAsmList); override;
@@ -60,7 +61,7 @@ implementation
       symconst,symtype,symdef,symsym,symtable,defutil,llvmdef,
       pass_2,
       parabase,paramgr,
-      cgbase,cgutils,cgexcept,tgobj,hlcgobj,llvmbase;
+      cpubase,cgbase,cgutils,cgexcept,tgobj,hlcgobj,llvmbase;
 
     {*****************************************************************************
                          tllvmexceptionstatehandler
@@ -68,6 +69,7 @@ implementation
 
     type
       tllvmexceptionstatehandler = class(tcgexceptionstatehandler)
+        class function use_seh: boolean;
         class procedure get_exception_temps(list: TAsmList; var t: texceptiontemps); override;
         class procedure unget_exception_temps(list: TAsmList; const t: texceptiontemps); override;
         class procedure new_exception(list: TAsmList; const t: texceptiontemps; const exceptframekind: texceptframekind; out exceptstate: texceptionstate); override;
@@ -84,6 +86,13 @@ implementation
         class procedure begin_catch_internal(list: TAsmList; excepttype: tobjectdef; nextonlabel: tasmlabel; add_catch: boolean; out exceptlocdef: tdef; out exceptlocreg: tregister);
         class procedure catch_all_start_internal(list: TAsmList; add_catch: boolean);
       end;
+
+
+      class function tllvmexceptionstatehandler.use_seh: boolean;
+        begin
+          result:=(target_info.system in systems_all_windows) and
+                  not(tf_use_psabieh in target_info.flags);
+        end;
 
 
       class procedure tllvmexceptionstatehandler.get_exception_temps(list: TAsmList; var t: texceptiontemps);
@@ -140,33 +149,74 @@ implementation
 
       class procedure tllvmexceptionstatehandler.emit_except_label(list: TAsmList; exceptframekind: texceptframekind; var exceptionstate: texceptionstate;var exceptiontemps:texceptiontemps);
         var
-          reg: tregister;
+          reg, csreg: tregister;
           landingpad: taillvm;
           landingpaddef: trecorddef;
+          catchpadlab, catchbodylab, outerexceptlab: tasmlabel;
         begin
           hlcg.g_unreachable(list);
           hlcg.a_label(list,exceptionstate.exceptionlabel);
-          { use packrecords 1 because we don't want padding (LLVM 4.0+ requires
-            exactly two fields in this struct) }
-          landingpaddef:=llvmgettemprecorddef([voidpointertype,u32inttype],
-            1,
-            targetinfos[target_info.system]^.alignment.recordalignmin);
-          reg:=hlcg.getregisterfordef(list,landingpaddef);
-          landingpad:=taillvm.landingpad(reg,landingpaddef,{clause}nil);
-          list.concat(landingpad);
-          if exceptframekind<>tek_except then
-            begin
-              if not assigned(exceptionstate.finallycodelabel) then
-                internalerror(2018111102);
-              if use_cleanup(exceptframekind) then
-                landingpad.landingpad_add_clause(la_cleanup, nil, nil)
-              else
-                landingpad.landingpad_add_clause(la_catch, voidpointertype, nil);
-              hlcg.a_label(list,exceptionstate.finallycodelabel);
-              exceptionstate.finallycodelabel:=nil;
-            end;
           { consistency check }
-          tllvmprocinfo(current_procinfo).popexceptlabel(exceptionstate.exceptionlabel);
+          if tllvmprocinfo(current_procinfo).popexceptlabel(exceptionstate.exceptionlabel) then
+            outerexceptlab:=nil
+          else
+            outerexceptlab:=tllvmprocinfo(current_procinfo).CurrExceptLabel;
+          if use_seh then
+            begin
+              if (exceptframekind<>tek_except) and
+                 use_cleanup(exceptframekind) then
+                begin
+                  if not assigned(exceptionstate.finallycodelabel) then
+                    internalerror(2018111103);
+                  reg:=hlcg.getaddressregister(list,voidpointertype);
+                  landingpad:=taillvm.cleanuppad(reg,NR_NO);
+                  list.concat(landingpad);
+                  hlcg.a_label(list,exceptionstate.finallycodelabel);
+                  exceptionstate.finallycodelabel:=nil;
+                end
+              else
+                begin
+                  csreg:=hlcg.getaddressregister(list,voidpointertype);
+                  current_asmdata.getjumplabel(catchpadlab);
+                  current_asmdata.getjumplabel(catchbodylab);
+                  list.concat(taillvm.catchswitch(csreg,NR_NO,catchpadlab,outerexceptlab));
+                  hlcg.a_label(list,catchpadlab);
+                  reg:=hlcg.getaddressregister(list,voidpointertype);
+                  landingpad:=taillvm.catchpad(reg,csreg,voidpointertype,nil);
+                  list.concat(landingpad);
+                  list.concat(taillvm.catchret(reg,catchbodylab));
+                  hlcg.a_label(list,catchbodylab);
+                  if exceptframekind<>tek_except then
+                    begin
+                      if not assigned(exceptionstate.finallycodelabel) then
+                        internalerror(2018111104);
+                      hlcg.a_label(list,exceptionstate.finallycodelabel);
+                      exceptionstate.finallycodelabel:=nil;
+                    end;
+                end;
+            end
+          else
+            begin
+              { use packrecords 1 because we don't want padding (LLVM 4.0+ requires
+                exactly two fields in this struct) }
+              landingpaddef:=llvmgettemprecorddef([voidpointertype,u32inttype],
+                1,
+                targetinfos[target_info.system]^.alignment.recordalignmin);
+              reg:=hlcg.getregisterfordef(list,landingpaddef);
+              landingpad:=taillvm.landingpad(reg,landingpaddef,{clause}nil);
+              list.concat(landingpad);
+              if exceptframekind<>tek_except then
+                begin
+                  if not assigned(exceptionstate.finallycodelabel) then
+                    internalerror(2018111102);
+                  if use_cleanup(exceptframekind) then
+                    landingpad.landingpad_add_clause(la_cleanup, nil, nil)
+                  else
+                    landingpad.landingpad_add_clause(la_catch, voidpointertype, nil);
+                  hlcg.a_label(list,exceptionstate.finallycodelabel);
+                  exceptionstate.finallycodelabel:=nil;
+                end;
+            end;
           tllvmprocinfo(current_procinfo).pushlandingpad(landingpad);
         end;
 
@@ -196,6 +246,11 @@ implementation
         var
           landingpad: taillvm;
         begin
+          if use_seh then
+            begin
+              inherited;
+              exit;
+            end;
           { if not a single catch block added -> catch all }
           landingpad:=tllvmprocinfo(current_procinfo).currlandingpad;
           if assigned(landingpad) and
@@ -216,7 +271,24 @@ implementation
           landingpad: taillvm;
           landingpadres: tregister;
           landingpadresdef: tdef;
+          outerexceptlab: tasmlabel;
         begin
+          if use_seh then
+            begin
+              landingpad:=tllvmprocinfo(current_procinfo).currlandingpad;
+              if landingpad.llvmopcode=la_cleanuppad then
+                begin
+                  landingpadres:=landingpad.oper[0]^.reg;
+                  if fc_catching_exceptions in flowcontrol then
+                    outerexceptlab:=tllvmprocinfo(current_procinfo).CurrExceptLabel
+                  else
+                    outerexceptlab:=nil;
+                  list.concat(taillvm.cleanupret(landingpadres,outerexceptlab));
+                end
+              else
+                hlcg.g_call_system_proc(list,'fpc_reraise',[],nil).resetiftemp;
+              exit;
+            end;
           { We use resume to propagate the exception to an outer function frame, and call
             reraise in case we are nested in another exception frame in the current function
             (because then we will emit an invoke which will tie this re-raise to that other
@@ -247,26 +319,36 @@ implementation
 
       class procedure tllvmexceptionstatehandler.begin_catch(list: TAsmList; excepttype: tobjectdef; nextonlabel: tasmlabel; out exceptlocdef: tdef; out exceptlocreg: tregister);
         begin
-          begin_catch_internal(list,excepttype,nextonlabel,true,exceptlocdef,exceptlocreg);
+          if use_seh then
+            inherited
+          else
+            begin_catch_internal(list,excepttype,nextonlabel,true,exceptlocdef,exceptlocreg);
         end;
 
 
       class procedure tllvmexceptionstatehandler.end_catch(list: TAsmList);
         begin
-          hlcg.g_call_system_proc(list,'fpc_psabi_end_catch',[],nil).resetiftemp;
+          if not use_seh then
+            hlcg.g_call_system_proc(list,'fpc_psabi_end_catch',[],nil).resetiftemp;
           inherited;
         end;
 
 
       class procedure tllvmexceptionstatehandler.catch_all_start(list: TAsmList);
         begin
-          catch_all_start_internal(list,true);
+          if use_seh then
+            inherited
+          else
+            catch_all_start_internal(list,true);
         end;
 
 
       class procedure tllvmexceptionstatehandler.catch_all_end(list: TAsmList);
         begin
-          hlcg.g_call_system_proc(list,'fpc_psabi_end_catch',[],nil).resetiftemp;
+          if use_seh then
+            inherited
+          else
+            hlcg.g_call_system_proc(list,'fpc_psabi_end_catch',[],nil).resetiftemp;
         end;
 
 
@@ -442,6 +524,24 @@ implementation
         else
           begin
             cexceptionstatehandler:=tllvmexceptionstatehandler;
+          end;
+      end;
+
+
+    procedure tllvmprocinfo.set_eh_info;
+      begin
+        if po_assembler in procdef.procoptions then
+          inherited
+        else if (pi_uses_exceptions in flags) or
+           ((cs_implicit_exceptions in current_settings.moduleswitches) and
+            (pi_needs_implicit_finally in flags)) then
+          begin
+            if tf_use_psabieh in target_info.flags then
+              procdef.personality:=search_system_proc('_FPC_PSABIEH_PERSONALITY_V0')
+            else if target_info.system in [system_x86_64_win64,system_aarch64_win64] then
+              procdef.personality:=search_system_proc('__FPC_specific_handler')
+            else if target_info.system=system_i386_win32 then
+              procdef.personality:=search_system_proc('__FPC_except_handler');
           end;
       end;
 

@@ -28,6 +28,7 @@ unit cpunode;
   implementation
 
     uses
+{$ifndef llvm}
        { generic nodes }
        ncgbas,
        ncgld,
@@ -63,6 +64,9 @@ unit cpunode;
        { symtable }
        symcpu,
        aasmdef
+{$else llvm}
+       llvmnode
+{$endif llvm}
        ;
 
 end.

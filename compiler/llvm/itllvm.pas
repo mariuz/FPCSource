@@ -33,6 +33,7 @@ interface
         { terminator instructions }
         'ret', 'br', 'switch', 'indirectbr',
         'invoke', 'resume',
+        'catchswitch', 'catchret', 'cleanupret',
         'unreachable',
         { binary operations }
         'add', 'fadd', 'sub', 'fsub', 'mul', 'fmul',
@@ -57,6 +58,7 @@ interface
         'icmp', 'fcmp',
         'phi', 'select', 'call',
         'va_arg', 'landingpad',
+        'catchpad', 'cleanuppad',
         'blockaddress',
         'freeze',
         { fpc pseudo opcodes }

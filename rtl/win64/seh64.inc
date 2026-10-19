@@ -594,7 +594,7 @@ function __FPC_specific_handler(
   var rec: TExceptionRecord;
   frame: Pointer;
   var context: TCONTEXT;
-  var dispatch: TDispatcherContext): EXCEPTION_DISPOSITION; [public,alias:'__FPC_specific_handler'];
+  var dispatch: TDispatcherContext): EXCEPTION_DISPOSITION; [public,alias:'__FPC_specific_handler']; compilerproc;
 
 var
   TargetRva,ControlRva: DWord;

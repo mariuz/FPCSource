@@ -120,6 +120,11 @@ interface
         constructor landingpad(dst:tregister;def:tdef;firstclause:taillvm);
         constructor exceptclause(op:tllvmop;def:tdef;kind:TAsmSymbol;nextclause:taillvm);
         constructor cleanupclause;
+        constructor catchswitch(dst,parent:tregister;handler,unwindlab:tasmlabel);
+        constructor catchpad(dst,parent:tregister;def:tdef;kind:TAsmSymbol);
+        constructor cleanuppad(dst,parent:tregister);
+        constructor catchret(pad:tregister;tolab:tasmlabel);
+        constructor cleanupret(pad:tregister;unwindlab:tasmlabel);
 
         { e.g. dst = call retsize name (paras) }
         constructor call_size_name_paras(callpd: tdef;cc: tproccalloption;dst: tregister;retsize: tdef;name:tasmsymbol;paras: tfplist);
@@ -615,7 +620,7 @@ implementation
       begin
         case llvmopcode of
           la_ret, la_br, la_switch, la_indirectbr,
-          la_resume,
+          la_resume, la_catchret, la_cleanupret,
           la_unreachable,
           la_store,
           la_fence,
@@ -640,6 +645,7 @@ implementation
           la_icmp, la_fcmp,
           la_phi, la_select,
           la_va_arg, la_landingpad,
+          la_catchswitch, la_catchpad, la_cleanuppad,
           la_freeze:
             begin
               if opnr=0 then
@@ -690,6 +696,16 @@ implementation
                 result:=oper[0]^.def
               else
                 internalerror(2013110101);
+            end;
+          la_catchswitch, la_catchpad, la_cleanuppad,
+          la_catchret, la_cleanupret:
+            begin
+              if opnr in [0,1] then
+                result:=voidpointertype
+              else if (llvmopcode=la_catchpad) and (opnr=3) then
+                result:=oper[2]^.def
+              else
+                internalerror(2013110112);
             end;
           la_invoke, la_call:
             begin
@@ -1227,6 +1243,69 @@ implementation
       begin
         create_llvm(la_cleanup);
         ops:=0;
+      end;
+
+
+    constructor taillvm.catchswitch(dst, parent: tregister; handler, unwindlab: tasmlabel);
+      begin
+        create_llvm(la_catchswitch);
+        loadreg(0,dst);
+        loadreg(1,parent);
+        loadsymbol(2,handler,0);
+        if assigned(unwindlab) then
+          begin
+            ops:=4;
+            loadsymbol(3,unwindlab,0);
+          end
+        else
+          ops:=3;
+      end;
+
+
+    constructor taillvm.catchpad(dst, parent: tregister; def: tdef; kind: TAsmSymbol);
+      var
+        ref: treference;
+      begin
+        create_llvm(la_catchpad);
+        ops:=4;
+        loadreg(0,dst);
+        loadreg(1,parent);
+        loaddef(2,def);
+        reference_reset_symbol(ref,kind,0,def.alignment,[]);
+        ref.refaddr:=addr_full;
+        loadref(3,ref);
+      end;
+
+
+    constructor taillvm.cleanuppad(dst, parent: tregister);
+      begin
+        create_llvm(la_cleanuppad);
+        ops:=2;
+        loadreg(0,dst);
+        loadreg(1,parent);
+      end;
+
+
+    constructor taillvm.catchret(pad: tregister; tolab: tasmlabel);
+      begin
+        create_llvm(la_catchret);
+        ops:=2;
+        loadreg(0,pad);
+        loadsymbol(1,tolab,0);
+      end;
+
+
+    constructor taillvm.cleanupret(pad: tregister; unwindlab: tasmlabel);
+      begin
+        create_llvm(la_cleanupret);
+        loadreg(0,pad);
+        if assigned(unwindlab) then
+          begin
+            ops:=2;
+            loadsymbol(1,unwindlab,0);
+          end
+        else
+          ops:=1;
       end;
 
 

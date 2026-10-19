@@ -405,7 +405,7 @@ function __FPC_except_handler(
   var rec: TExceptionRecord;
   var frame: TSEHFrame;
   var context: TContext;
-  var dispatch: TDispatcherContext): EXCEPTION_DISPOSITION; cdecl; [public,alias:'__FPC_except_handler'];
+  var dispatch: TDispatcherContext): EXCEPTION_DISPOSITION; cdecl; [public,alias:'__FPC_except_handler']; compilerproc;
 begin
   if (rec.ExceptionFlags and EXCEPTION_UNWIND)=0 then
   begin

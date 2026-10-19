@@ -41,6 +41,7 @@ interface
       { terminator instructions }
       la_ret, la_br, la_switch, la_indirectbr,
       la_invoke, la_resume,
+      la_catchswitch, la_catchret, la_cleanupret,
       la_unreachable,
       { binary operations }
       la_add, la_fadd, la_sub, la_fsub, la_mul, la_fmul,
@@ -65,6 +66,7 @@ interface
       la_icmp, la_fcmp,
       la_phi, la_select, la_call,
       la_va_arg, la_landingpad,
+      la_catchpad, la_cleanuppad,
       la_blockaddress,
       la_freeze,
       { fpc pseudo opcodes }
@@ -82,6 +84,7 @@ interface
   const
     llvmterminatoropcodes = [la_ret, la_br, la_switch, la_indirectbr,
       la_invoke, la_resume,
+      la_catchswitch, la_catchret, la_cleanupret,
       la_unreachable];
 
     llvmvalueextension2str: array[tllvmvalueextension] of TSymStr = ('',
