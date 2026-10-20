@@ -1041,7 +1041,10 @@ implementation
             are not considered to have the same semantics as the C function with
             the same name }
           if not(po_external in pd.procoptions) then
-            writer.AsmWrite(' nobuiltin');
+            begin
+              writer.AsmWrite(' nobuiltin');
+              writer.AsmWrite(' uwtable');
+            end;
           if po_noreturn in pd.procoptions then
             writer.AsmWrite(' noreturn');
           if pio_thunk in pd.implprocoptions then
@@ -1724,6 +1727,9 @@ implementation
           optstr:=optstr+' -fno-omit-frame-pointer'
         else
           optstr:=optstr+' -fomit-frame-pointer';
+        { asynchronous unwind tables for hardware/signal exception handling }
+        if tf_use_psabieh in target_info.flags then
+          optstr:=optstr+' -fasynchronous-unwind-tables';
         { fast math }
         if cs_opt_fastmath in current_settings.optimizerswitches then
           optstr:=optstr+' -ffast-math';

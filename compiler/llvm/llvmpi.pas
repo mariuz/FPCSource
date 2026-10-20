@@ -131,9 +131,10 @@ implementation
             as otherwise we get an error; we can also generate exceptions from
             invalid memory accesses and the like, but LLVM cannot model that
             --
-            We cheat for now by adding an invoke to a dummy routine at the start and at
-            the end of the try-block. That will not magically fix the state
-            of all variables when the exception gets caught though. }
+            We add an invoke to a dummy routine at the start and at the end of the
+            try-block, combined with marking variable allocations in procedures using
+            exceptions and stores inside try-blocks as volatile in hlcgllvm so that
+            variable state in memory is preserved when an exception gets caught. }
           hlcg.g_call_system_proc(list,'FPC_DUMMYPOTENTIALRAISE',[],nil).resetiftemp;
         end;
 

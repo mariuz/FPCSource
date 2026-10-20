@@ -2140,9 +2140,24 @@ implementation
       hreg1,
       hreg2: tregister;
       tmpref: treference;
+      volatility: tvolatilityset;
     begin
       if ref.alignment=0 then
         internalerror(2016072203);
+      volatility:=ref.volatility;
+      { Inside try blocks, mark stores as volatile so LLVM cannot sink or eliminate
+        them across a potential exception (including hardware/signal exceptions).
+        In procedures using exceptions, also mark loads from stack temporaries as
+        volatile so except/finally blocks observe the latest values. }
+      if (fc_catching_exceptions in flowcontrol) and
+         (ref.refaddr<>addr_full) then
+        include(volatility,vol_write);
+      if assigned(current_procinfo) and
+         (pi_uses_exceptions in current_procinfo.flags) and
+         (ref.base<>NR_NO) and
+         (getregtype(ref.base)=R_TEMPREGISTER) and
+         (ref.refaddr<>addr_full) then
+        include(volatility,vol_read);
       { already simple? }
       if (not assigned(ref.symbol) or
           (ref.base=NR_NO)) and
@@ -2150,6 +2165,7 @@ implementation
          (ref.offset=0) then
         begin
           result:=ref;
+          result.volatility:=volatility;
           exit;
         end;
       { At this levevl, perform all calculations using plain pointer arithmetic.
@@ -2164,7 +2180,7 @@ implementation
         begin
           if ref.base<>NR_NO then
             internalerror(2012111301);
-          reference_reset_symbol(tmpref,ref.symbol,0,ref.alignment,ref.volatility);
+          reference_reset_symbol(tmpref,ref.symbol,0,ref.alignment,volatility);
           list.concat(taillvm.getelementptr_reg_size_ref_size_const(hreg1,ptrdef,tmpref,ptruinttype,0,true));
         end
       else if ref.base<>NR_NO then
@@ -2189,7 +2205,7 @@ implementation
         end;
       hreg2:=getaddressregister(list,ptrdef);
       a_load_reg_reg(list,ptruinttype,ptrdef,hreg1,hreg2);
-      reference_reset_base(result,ptrdef,hreg2,0,ref.temppos,ref.alignment,ref.volatility);
+      reference_reset_base(result,ptrdef,hreg2,0,ref.temppos,ref.alignment,volatility);
     end;
 
 
@@ -2295,6 +2311,16 @@ implementation
 
   procedure thlcgllvm.varsym_set_localloc(list: TAsmList; vs: tabstractnormalvarsym);
     begin
+      { When a procedure uses exceptions, tabstractvarsym.is_regvar disables regvars
+        so local variables and parameters are placed in stack memory (alloca).
+        Mark their memory references as volatile so LLVM's mem2reg/SROA/DSE passes
+        do not promote them to SSA registers or eliminate stores across potential
+        exceptions inside try blocks. }
+      if assigned(current_procinfo) and
+         (pi_uses_exceptions in current_procinfo.flags) and
+         (vs.initialloc.loc=LOC_REFERENCE) and
+         (vs.initialloc.reference.refaddr<>addr_full) then
+        vs.initialloc.reference.volatility:=[vol_read,vol_write];
       if cs_asm_source in current_settings.globalswitches then
         begin
           case vs.initialloc.loc of
