@@ -40,6 +40,8 @@ interface
         function first_fma: tnode; override;
         function first_sqr_real: tnode; override;
         function first_sqrt_real: tnode; override;
+        function first_int_real: tnode; override;
+        function first_round_real: tnode; override;
         function first_trunc_real: tnode; override;
         function first_popcnt: tnode; override;
        public
@@ -61,7 +63,7 @@ implementation
        pass_2,
        cgbase,cgutils,tgobj,hlcgobj,
        cpubase,
-       llvmbase,aasmllvm,aasmllvmmetadata;
+       llvmbase,llvminfo,llvmdef,aasmllvm,aasmllvmmetadata;
 
      procedure tllvminlinenode.maybe_remove_round_trunc_typeconv;
        var
@@ -264,7 +266,28 @@ implementation
 
 
     function tllvminlinenode.first_sqr_real: tnode;
+      var
+        lefttemp,
+        resulttemp: ttempcreatenode;
+        stat: tstatementnode;
       begin
+        if not(cs_opt_fastmath in current_settings.optimizerswitches) and
+           is_fpu(left.resultdef) then
+          begin
+            result:=internalstatements(stat);
+            lefttemp:=ctempcreatenode.create(left.resultdef,left.resultdef.size,tt_persistent,true);
+            resulttemp:=ctempcreatenode.create(resultdef,resultdef.size,tt_persistent,true);
+            addstatement(stat,lefttemp);
+            addstatement(stat,resulttemp);
+            addstatement(stat,cassignmentnode.create(ctemprefnode.create(lefttemp),left));
+            addstatement(stat,cassignmentnode.create(ctemprefnode.create(resulttemp),
+              caddnode.create(muln,ctemprefnode.create(lefttemp),ctemprefnode.create(lefttemp))));
+            addstatement(stat,ctempdeletenode.create(lefttemp));
+            addstatement(stat,ctempdeletenode.create_normal_temp(resulttemp));
+            addstatement(stat,ctemprefnode.create(resulttemp));
+            left:=nil;
+            exit;
+          end;
         result:=nil;
         if use_vectorfpu(left.resultdef) then
           expectloc:=LOC_MMREGISTER
@@ -320,15 +343,118 @@ implementation
       end;
 
 
+    function tllvminlinenode.first_int_real: tnode;
+      var
+        exceptmode: ansistring;
+        intrinsic: string[40];
+      begin
+        if (left.resultdef.typ=floatdef) and
+           (tfloatdef(left.resultdef).floattype in [s32real,s64real,s80real,sc80real,s128real]) then
+          begin
+            if cs_opt_fastmath in current_settings.optimizerswitches then
+              begin
+                intrinsic:='llvm_trunc'+llvmfloatintrinsicsuffix(tfloatdef(left.resultdef));
+                result:=ccallnode.createintern(intrinsic,ccallparanode.create(left,nil));
+                left:=nil;
+                exit;
+              end
+            else if llvmflag_constrained_fptrunc_fpext in llvmversion_properties[current_settings.llvmversion] then
+              begin
+                exceptmode:=llvm_constrainedexceptmodestring;
+                result:=ccallnode.createintern('LLVM_EXPERIMENTAL_CONSTRAINED_TRUNC',
+                  ccallparanode.create(cstringconstnode.createpchar(ansistring2pchar(exceptmode),length(exceptmode),llvm_metadatatype),
+                    ccallparanode.create(left,nil)
+                  )
+                );
+                left:=nil;
+                exit;
+              end;
+          end;
+        result:=inherited;
+      end;
+
+
+    function tllvminlinenode.first_round_real: tnode;
+      var
+        exceptmode: ansistring;
+        rintnode: tnode;
+        intrinsic: string[60];
+      begin
+        if cs_opt_fastmath in current_settings.optimizerswitches then
+          begin
+            maybe_remove_round_trunc_typeconv;
+            if (left.resultdef.typ=floatdef) and
+               (tfloatdef(left.resultdef).floattype in [s32real,s64real,s80real,sc80real,s128real]) then
+              begin
+                intrinsic:='llvm_rint'+llvmfloatintrinsicsuffix(tfloatdef(left.resultdef));
+                rintnode:=ccallnode.createintern(intrinsic,ccallparanode.create(left,nil));
+                result:=cinlinenode.create(in_trunc_real,false,rintnode);
+                left:=nil;
+                exit;
+              end;
+          end
+        else if llvmflag_constrained_fptoi_itofp in llvmversion_properties[current_settings.llvmversion] then
+          begin
+            maybe_remove_round_trunc_typeconv;
+            if (left.resultdef.typ=floatdef) and
+               (tfloatdef(left.resultdef).floattype in [s32real,s64real,s80real,sc80real,s128real]) and
+               (resultdef.typ=orddef) and
+               (torddef(resultdef).ordtype=s64bit) then
+              begin
+                exceptmode:=llvm_constrainedexceptmodestring;
+                rintnode:=ccallnode.createintern('LLVM_EXPERIMENTAL_CONSTRAINED_RINT',
+                  ccallparanode.create(cstringconstnode.createpchar(ansistring2pchar(exceptmode),length(exceptmode),llvm_metadatatype),
+                    ccallparanode.create(cstringconstnode.createpchar(ansistring2pchar('round.dynamic'),length('round.dynamic'),llvm_metadatatype),
+                      ccallparanode.create(left,nil)
+                    )
+                  )
+                );
+                intrinsic:='llvm_experimental_constrained_fptosi_i64'+llvmfloatintrinsicsuffix(tfloatdef(left.resultdef));
+                result:=ccallnode.createintern(intrinsic,
+                  ccallparanode.create(cstringconstnode.createpchar(ansistring2pchar(exceptmode),length(exceptmode),llvm_metadatatype),
+                    ccallparanode.create(rintnode,nil)
+                  )
+                );
+                left:=nil;
+                exit;
+              end;
+          end;
+        result:=inherited;
+      end;
+
+
     function tllvminlinenode.first_trunc_real: tnode;
+      var
+        exceptmode: ansistring;
+        intrinsic: string[60];
       begin
         { fptosi is undefined if the value is out of range -> only generate
-          in cast of fastmath }
+          directly in case of fastmath, or via constrained fptosi intrinsic }
         if cs_opt_fastmath in current_settings.optimizerswitches then
           begin
             maybe_remove_round_trunc_typeconv;
             expectloc:=LOC_REGISTER;
             result:=nil;
+          end
+        else if llvmflag_constrained_fptoi_itofp in llvmversion_properties[current_settings.llvmversion] then
+          begin
+            maybe_remove_round_trunc_typeconv;
+            if (left.resultdef.typ=floatdef) and
+               (tfloatdef(left.resultdef).floattype in [s32real,s64real,s80real,sc80real,s128real]) and
+               (resultdef.typ=orddef) and
+               (torddef(resultdef).ordtype=s64bit) then
+              begin
+                exceptmode:=llvm_constrainedexceptmodestring;
+                intrinsic:='llvm_experimental_constrained_fptosi_i64'+llvmfloatintrinsicsuffix(tfloatdef(left.resultdef));
+                result:=ccallnode.createintern(intrinsic,
+                  ccallparanode.create(cstringconstnode.createpchar(ansistring2pchar(exceptmode),length(exceptmode),llvm_metadatatype),
+                    ccallparanode.create(left,nil)
+                  )
+                );
+                left:=nil;
+              end
+            else
+              result:=inherited;
           end
         else
           result:=inherited;

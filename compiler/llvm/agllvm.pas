@@ -104,6 +104,7 @@ interface
         procedure WriterInstructionMetadata(sep: TSymStr; metatai: tai);
        protected
         owner: TLLVMAssember;
+        ffastmath: boolean;
 
         function getopcodestr(hp: taillvm): TSymStr;
         function getopstr(const o:toper; refwithalign: boolean) : TSymStr;
@@ -800,6 +801,16 @@ implementation
             if vol_write in hp.oper[3]^.ref^.volatility then
               result:=result+' volatile';
           end;
+        la_fadd,
+        la_fsub,
+        la_fmul,
+        la_fdiv,
+        la_frem,
+        la_fcmp:
+          begin
+            if ffastmath then
+              result:=result+' fast';
+          end;
         else
           ;
       end;
@@ -1377,6 +1388,7 @@ implementation
                     end
                   else
                     begin
+                      InstrWriter.ffastmath:=pio_fastmath in tprocdef(taillvmdecl(hp).def).implprocoptions;
                       writer.AsmWrite('define');
                       if ldf_weak in taillvmdecl(hp).flags then
                         writer.AsmWrite(' weak');

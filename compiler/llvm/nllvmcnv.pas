@@ -120,7 +120,8 @@ function tllvmtypeconvnode.first_int_to_real: tnode;
   var
     exceptmode: ansistring;
   begin
-    if (llvmflag_constrained_fptoi_itofp in llvmversion_properties[current_settings.llvmversion]) and
+    if not(cs_opt_fastmath in current_settings.optimizerswitches) and
+       (llvmflag_constrained_fptoi_itofp in llvmversion_properties[current_settings.llvmversion]) and
        { these are converted to 80 bits first in any case }
        not(tfloatdef(resultdef).floattype in [s64currency,s64comp]) and
        { no actual int -> floating point conversion }

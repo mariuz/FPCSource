@@ -51,7 +51,7 @@ implementation
        verbose,globtype,globals,cutils,
        aasmdata,
        symconst,symtype,symdef,defutil,
-       llvmbase,aasmllvm,aasmllvmmetadata,
+       llvmbase,llvminfo,aasmllvm,aasmllvmmetadata,
        cgbase,cgutils,pass_1,
        hlcgobj,
        nadd,ncal,ncnv,ncon
@@ -61,15 +61,19 @@ implementation
 
   function tllvmaddnode.pass_1: tnode;
     var
-      exceptmode: ansistring;
+      exceptmode,
+      metastr: ansistring;
       intrname: string;
-      iscompcurrency: boolean;
+      iscompcurrency,
+      iscmp: boolean;
     begin
       result:=inherited pass_1;
       if not assigned(result) and
          is_fpu(left.resultdef) and
          not(cs_opt_fastmath in current_settings.optimizerswitches) then
         begin
+          iscmp:=false;
+          metastr:='round.dynamic';
           case nodetype of
             addn:
               begin
@@ -87,6 +91,52 @@ implementation
               begin
                 intrname:='LLVM_EXPERIMENTAL_CONSTRAINED_FDIV';
               end;
+            equaln,
+            unequaln,
+            ltn,
+            lten,
+            gtn,
+            gten:
+              if llvmflag_constrained_fptoi_itofp in llvmversion_properties[current_settings.llvmversion] then
+                begin
+                  iscmp:=true;
+                  case nodetype of
+                    equaln:
+                      begin
+                        intrname:='LLVM_EXPERIMENTAL_CONSTRAINED_FCMP';
+                        metastr:='oeq';
+                      end;
+                    unequaln:
+                      begin
+                        intrname:='LLVM_EXPERIMENTAL_CONSTRAINED_FCMP';
+                        metastr:='une';
+                      end;
+                    ltn:
+                      begin
+                        intrname:='LLVM_EXPERIMENTAL_CONSTRAINED_FCMPS';
+                        metastr:='olt';
+                      end;
+                    lten:
+                      begin
+                        intrname:='LLVM_EXPERIMENTAL_CONSTRAINED_FCMPS';
+                        metastr:='ole';
+                      end;
+                    gtn:
+                      begin
+                        intrname:='LLVM_EXPERIMENTAL_CONSTRAINED_FCMPS';
+                        metastr:='ogt';
+                      end;
+                    gten:
+                      begin
+                        intrname:='LLVM_EXPERIMENTAL_CONSTRAINED_FCMPS';
+                        metastr:='oge';
+                      end;
+                    else
+                      internalerror(2026102101);
+                  end;
+                end
+              else
+                intrname:='';
             else
               begin
                 intrname:='';
@@ -94,6 +144,8 @@ implementation
           end;
           if intrname<>'' then
             begin
+              if nf_swapped in flags then
+                swapleftright;
               iscompcurrency:=tfloatdef(left.resultdef).floattype in [s64currency,s64comp];
               if iscompcurrency then
                 begin
@@ -103,14 +155,14 @@ implementation
               exceptmode:=llvm_constrainedexceptmodestring;
               result:=ccallnode.createintern(intrname,
                 ccallparanode.create(cstringconstnode.createpchar(ansistring2pchar(exceptmode),length(exceptmode),llvm_metadatatype),
-                  ccallparanode.create(cstringconstnode.createpchar(ansistring2pchar('round.dynamic'),length('round.dynamic'),llvm_metadatatype),
+                  ccallparanode.create(cstringconstnode.createpchar(ansistring2pchar(metastr),length(metastr),llvm_metadatatype),
                     ccallparanode.create(right,
                       ccallparanode.create(left,nil)
                     )
                   )
                 )
               );
-              if iscompcurrency then
+              if iscompcurrency or iscmp then
                 begin
                   result:=ctypeconvnode.create_internal(result,resultdef);
                 end;
